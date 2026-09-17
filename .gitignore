@@ -1,0 +1,71 @@
+# ============================================================
+# 本仓库只保存工具代码，不保存任何业务数据
+# ============================================================
+
+# ---------- 台账与明细数据 ----------
+material-system/out/
+material-system/src/*.xlsx
+*.csv
+!docs/samples/*.csv
+
+# ---------- 生成的数据文件（绝不入库） ----------
+workbench-data.js
+workbench-data.json
+
+# ---------- 本地配置（含集成商名单等真实信息） ----------
+material-system/src/suppliers.json
+
+# ---------- 生成的交付物（含真实内容） ----------
+output/*.docx
+output/*.xlsx
+output/*.pdf
+output/*.zip
+output/*.html
+output/站址确认单-分区县/
+output/_*
+output/~$*
+workbench-data.js
+
+# ---------- 临时与缓存 ----------
+.tmp/
+*.log
+*.tmp
+~$*
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---------- 本地记忆与运行时（含单位/人名等内部信息） ----------
+.workbuddy/
+.claude/
+.DS_Store
+Thumbs.db
+
+# ---------- 编辑器 ----------
+.idea/
+.vscode/
+*.swp
+
+# ---------- 根目录临时脚本（下划线前缀） ----------
+/_*
+
+# ---------- 与本项目无关的遗留文件（其它任务产物，含内部信息） ----------
+/edit_ppt.py
+/extract_final.py
+/extract_full.py
+/md2docx.py
+/merge_ppts.py
+/migrate_workbuddy_finalize.ps1
+/final_ppt.txt
+/full_text.txt
+
+# ---------- 其它工具留下的参考目录 ----------
+/output/.*ref/
+/output/.*/
+
+# ---------- 一次性诊断脚本（含本机路径） ----------
+material-system/scratch/
+
+# ---------- 台账数据目录（本地使用，不入库） ----------
+/material-system/data/

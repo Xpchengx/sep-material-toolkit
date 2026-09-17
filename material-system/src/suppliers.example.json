@@ -1,0 +1,5 @@
+{
+  "_说明": "复制本文件为 suppliers.json 并填入实际集成商名单。suppliers.json 已被 .gitignore 排除，不会进版本库。",
+  "_优先级": "命令行 --suppliers > 环境变量 LEDGER_SUPPLIERS > 本文件 > 空（不校验）",
+  "suppliers": ["集成商A", "集成商B", "集成商C"]
+}
