@@ -217,6 +217,45 @@ assert len(staged) <= EXPECTED_MAX, f'待提交 {len(staged)} 个，超出预期
 > 前者重写历史即可；后者要按泄露处理，因为可能已被抓取，
 > 还需考虑吊销密钥、通知相关方。
 
+### ⚠️ 提交前必须断言文件数并打印完整清单
+
+**这是最有价值的一条。** `git add -A` 会把你没意识到的东西全抓进去。
+
+真实事故：一次提交前加了「文件数必须在 26~36」的断言，结果拦下 **1859 个文件** ——
+早先一条坏掉的 bash 命令（`cd A 2>/dev/null || mkdir -p A && cd A`；`mkdir` 不可用 →
+`||` 短路了 `cd`）导致 `npm install` 在**仓库根目录**执行，产生了
+`node_modules`（1822 文件 / 21MB）+ `package.json` + `package-lock.json`。
+同时根目录还多了用户其它任务的 4 个文件。
+
+```python
+files = git_ls_files()
+assert EXPECT_MIN <= len(files) <= EXPECT_MAX, f'文件数 {len(files)} 超出预期，中止'
+for f in files: print(f)          # 必须打印出来，不能只报数量
+```
+
+**只报数量不够，要把清单打出来。** 数量对得上但内容是错的，一样会漏。
+
+顺手要拦的：
+
+| 类别 | 例子 |
+|---|---|
+| 第三方依赖目录 | `node_modules/`、`vendor/`、`__pycache__/` |
+| 包管理器产物 | `package.json` / `package-lock.json`（若不是你要发布的） |
+| 生成的规则/字典文件 | 看起来"只是生成的"，其实**内容就是业务数据**（如型号归一表 = 物料目录） |
+| 用户其它任务的产物 | 根目录里不属于本项目的脚本与文本 |
+
+> 判据：**问一句「这个文件的内容是谁的数据」。** 是生成的 ≠ 无害；
+> 生成物里装的是业务数据，就必须 ignore。
+
+### 误建大目录的清理
+
+```bash
+# 先确认是你建的，再删 —— 打印顶层包名核验
+ls node_modules | head            # 含预期依赖名才动
+```
+
+删除要**先列出内容让人看见**，再执行。删完重新 `git add -A` 并再次断言。
+
 ## 七、本机注意事项
 
 - **Bash 工具的 PATH 常损坏**（`dirname`/`cat`/`head` 全 not found），

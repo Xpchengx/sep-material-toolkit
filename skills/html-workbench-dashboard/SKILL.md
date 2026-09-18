@@ -250,6 +250,85 @@ gh api -X POST repos/<user>/<repo>/pages -f source[branch]=main -f source[path]=
 urllib.request.urlopen(url).headers.get('Content-Type')
 ```
 
+## 让用户把表格直接拖进来
+
+页面自己解析 xlsx 是最省事的数据接法。**不要因此引入 SheetJS**：单文件离线页面背几百 KB
+第三方库不划算，走 CDN 又断网就废。xlsx 本质是 ZIP，现代浏览器有原生解压：
+
+```js
+// 解 ZIP：EOCD → 中央目录 → 本地头 → DecompressionStream('deflate-raw')
+const ds = new DecompressionStream('deflate-raw');
+const out = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(ds)).arrayBuffer());
+```
+
+需要处理的：`xl/workbook.xml`（表名）、`xl/_rels/workbook.xml.rels`（表路径）、
+`xl/sharedStrings.xml`、`xl/styles.xml`（判断哪些单元格是日期）、sheet XML 里的
+`t="s"|"str"|"inlineStr"|"b"` 与 `<v>` / `<is><t>`。
+
+**验证方式**：与 `openpyxl` 交叉比对同一批文件的工作表名、行列数、逐格取值。
+本项目这样测过 3 个真实文件、全部工作表，前 8 行逐格一致才敢用。
+
+**别只看扩展名判断格式**：集成商经常改错后缀。用魔数 —— `PK\x03\x04` 是 ZIP（xlsx），
+`\xD0\xCF\x11\xE0` 是老的 .xls（浏览器读不了，要明确告诉他另存为 xlsx）。
+
+## ⚠️ 两套实现必须共用一份规则
+
+页面能算、Python 也能算时，**规则只能有一个来源**。让 Python 生成规则文件
+（归一表、分类关键词、安全库存、阈值）给页面读，别在 JS 里再抄一遍——
+抄一遍就等着两条路径算出不同结果。
+
+生成物要出**两种格式**：`.js`（`window.XXX = {...}`，页面用 `<script src>` 引）
+和 `.json`。**只给 .json 不行** —— 本地 `file://` 打开时 `fetch` 会被跨域策略拦掉。
+
+## ⚠️ 无年份日期跨年：唯一正确的解法是按行序推断
+
+台账里极常见「Excel 序列号 + 无年份中文日期」混排，而中文那段**往往跨年**：
+
+```
+… 8月7号 … 12月24号 │ 1月5号 … 9月2号
+      上一年          │     下一年
+```
+
+**统一补任何一年都会错**。实测影响：一笔 1.26 万米的入库被漏算/多算。
+
+```js
+// 按行序：月份变小即进一年（前提是台账按时间排，实际都成立）
+if (prevMonth !== null && md.m < prevMonth) curYear += 1;
+
+// ⚠️ 绝对日期（序列号/带年 ISO）不要更新 curYear/prevMonth
+//    否则夹在中间的一条会把年份又拉回去，回绕判断永远不触发
+```
+
+起手年份取「第一个无年份值**之前最近的**绝对日期」，比取全列最大年份更准。
+
+## 快照日：文件名优先于流水最大值
+
+`XX库存(9月8日).xlsx` 这种命名本身就标明了快照时点。
+若拿「流水里的最大日期」当快照，一旦有人误录了半年后的日期，
+整个 7 日窗口就偏了（本项目真出现过：文件是 9月1日的，流水里混进 2026-12-29）。
+
+顺序：用户指定 > **文件名里的日期** > 流水最大值。
+
+## DOM 层怎么测：jsdom + 桩
+
+没有 playwright 时，jsdom 也能做真实的端到端验证：
+
+```js
+// 必须注入的替代品
+window.indexedDB = makeInMemoryIDB();        // jsdom 不带
+window.DecompressionStream = DecompressionStream;  // 用 Node 原生的
+window.Response = Response; window.Blob = Blob;
+window.structuredClone = structuredClone;
+window.fetch = async () => { throw new Error('测试环境不联网'); };
+```
+
+然后用真实文件构造 `File` 调 `addFiles()`，走完整链路。
+**这能测出静态检查完全看不见的 bug**（本项目一次测出 4 个：日期没转 ISO、
+集成商识别不到、来源标签漏了一个分支、连带的天数算出 null）。
+
+> 注意：`let` / `const` 声明的顶层变量**不会**挂到 `window` 上。
+> 测试里访问 `window.MATERIALS` 得到 `undefined` 是正常的，要读 DOM 文本验证。
+
 ## 常见坑
 
 | 坑 | 处理 |
