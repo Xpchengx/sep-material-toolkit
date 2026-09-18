@@ -218,9 +218,68 @@
     .sidebar{display:none}
     .kpis{grid-template-columns:repeat(2,1fr)}
   }
+
+  /* ---------- 拖拽载入 ---------- */
+  #dropOverlay{
+    position:fixed; inset:0; z-index:900; display:none;
+    background:rgba(37,99,235,.10); backdrop-filter:blur(2px);
+    border:3px dashed var(--primary); border-radius:12px;
+    align-items:center; justify-content:center;
+  }
+  #dropOverlay.on{display:flex}
+  #dropOverlay.busy{border-style:solid; background:rgba(37,99,235,.16)}
+  #dropOverlay .inner{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:26px 34px; text-align:center; box-shadow:0 12px 34px rgba(0,0,0,.14);
+  }
+  #dropOverlay .big{font-size:18px; font-weight:700; color:var(--primary)}
+  #dropOverlay .sub{font-size:12.5px; color:var(--muted); margin-top:6px}
+
+  /* ---------- 更新提醒横幅 ---------- */
+  .stale-banner{
+    border:1px solid #f0d9a8; background:var(--warn-soft);
+    border-radius:10px; padding:12px 15px; margin-bottom:14px; font-size:13px;
+  }
+  .stale-banner.bad{border-color:#f2c2c2; background:var(--danger-soft)}
+  .stale-banner .sb-t{font-weight:700; color:var(--warn)}
+  .stale-banner.bad .sb-t{color:var(--danger)}
+  .stale-banner .sb-t.mt{margin-top:8px}
+  .stale-banner .sb-l{color:var(--muted); margin-top:5px; line-height:1.7; font-size:12.5px}
+
+  /* ---------- 状态标签 ---------- */
+  .tag{display:inline-block; padding:1px 8px; border-radius:10px; font-size:11.5px; font-weight:600}
+  .tag.ok{background:var(--ok-soft); color:var(--ok)}
+  .tag.warn{background:var(--warn-soft); color:var(--warn)}
+  .tag.bad{background:var(--danger-soft); color:var(--danger)}
+  .dim{color:var(--faint)}
+
+  /* ---------- 数据源面板 ---------- */
+  .src-tools{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px}
+  .src-tools input[type=text]{
+    flex:1; min-width:220px; padding:7px 10px; border:1px solid var(--line);
+    border-radius:7px; font-size:13px; font-family:inherit;
+  }
+  .src-tools input[type=number]{width:64px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px}
+  .src-tools label{font-size:12.5px; color:var(--muted)}
+  .drop-hint{
+    display:flex; align-items:center; gap:10px; padding:14px 16px; margin-bottom:14px;
+    border:1.5px dashed var(--line); border-radius:10px; background:var(--line2);
+    font-size:13px; color:var(--muted);
+  }
+  .drop-hint b{color:var(--primary)}
 </style>
 </head>
 <body>
+
+<!-- ==================== 拖拽载入遮罩 ==================== -->
+<div id="dropOverlay">
+  <div class="inner">
+    <div class="big">松手即可载入</div>
+    <div class="sub" id="dropText">支持 xlsx / csv 台账表，以及 workbench-data.json</div>
+    <div class="sub">数据只在本机解析，不会上传</div>
+  </div>
+</div>
+
 <div class="app">
 
   <!-- ==================== 左侧功能栏 ==================== -->
@@ -241,6 +300,7 @@
       <a data-view="report"><span class="ico">✎</span>库存日报</a>
       <a data-view="push"><span class="ico">✉</span>推送记录</a>
       <div class="nav-title">设置</div>
+      <a data-view="sources"><span class="ico">⧉</span>数据源<span class="badge neutral" id="navSrc">0</span></a>
       <a data-view="about"><span class="ico">⚙</span>数据与说明</a>
     </nav>
     <div class="side-foot" id="sideFoot">数据日期 —</div>
@@ -265,6 +325,7 @@
 
       <!-- ---------- 总览 ---------- -->
       <section class="view active" id="v-overview">
+        <div class="stale-banner" id="staleBanner" style="display:none"></div>
         <div class="kpis" id="kpis"></div>
 
         <div class="grid2">
@@ -478,6 +539,77 @@
         </div>
       </section>
 
+      <!-- ---------- 数据源 ---------- -->
+      <section class="view" id="v-sources">
+        <div class="drop-hint">
+          <span style="font-size:22px">⤓</span>
+          <div>
+            <b>把表格拖到页面上</b>即可载入 —— 集成商发来的 xlsx、导出的 csv，
+            以及生成好的 <code>workbench-data.json</code> 都支持。<br>
+            数据只在本机浏览器里解析，<b>不会上传到任何地方</b>。
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="btnPickFiles">选择文件…</button>
+          <input type="file" id="filePick2" accept=".xlsx,.xls,.csv,.json,.js" multiple hidden>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h2>已载入的表格</h2>
+            <span class="hint" id="srcHistory"></span>
+          </div>
+          <div class="card-b" style="padding:0">
+            <table>
+              <thead><tr>
+                <th>文件</th><th>集成商</th><th>类型</th><th>数据日期</th>
+                <th>距今天数</th><th>库存 / 流水行</th><th>状态</th>
+              </tr></thead>
+              <tbody id="srcList"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h2>更新提醒阈值</h2></div>
+          <div class="card-b">
+            <div class="src-tools">
+              <label>超过 <input type="number" id="setWarn" min="1" max="365"> 天未更新 → 提醒</label>
+              <label>超过 <input type="number" id="setBad" min="2" max="730"> 天 → 判为长期未更新</label>
+              <div class="spacer"></div>
+              <button class="btn" id="btnClearSrc">清除记录</button>
+            </div>
+            <div class="note">
+              按「数据日期」距今多少天算。数据日期取表格里最新的流水日期，或文件名里的日期
+              （如 <code>华为_库存_20260908.xlsx</code>）。库存表建议 7 天、流水表建议 15 天。
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h2>在线地址同步</h2></div>
+          <div class="card-b">
+            <div class="src-tools">
+              <input type="text" id="onlineUrl" placeholder="https://…/workbench-data.json　或　https://…/华为_库存_20260908.xlsx">
+              <button class="btn primary" id="btnOnline">⟳ 在线同步</button>
+            </div>
+            <div id="onlineHint" class="note" style="display:none">
+              <b>为什么金山/腾讯文档的链接拉不到？</b><br>
+              三个硬障碍，不是没做，是浏览器不允许：
+              ① 这类在线表格是 JS 动态渲染的页面，直连拿到的是空壳 HTML，不是数据；
+              ② 它们不开放跨域（CORS），网页发起的请求会被浏览器直接拦掉；
+              ③ 开放接口需要 Access Token，而令牌的密钥<b>不能放在公开网页里</b>。<br><br>
+              <b>能用的做法（任选）：</b><br>
+              · <b>本地小服务</b>：在放数据的机器上跑
+                <code>python -m http.server 8000</code>，然后填
+                <code>http://localhost:8000/workbench-data.json</code>
+                —— 数据不出你的局域网；<br>
+              · <b>可跨域的直链</b>：任何允许 CORS 的地址（自建接口、GitHub Raw 等）；<br>
+              · <b>走定时任务</b>：让服务器定时拉在线表格、生成
+                <code>workbench-data.json</code>，页面只拉这个结果文件。
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ---------- 数据与说明 ---------- -->
       <section class="view" id="v-about">
         <div class="card">
@@ -543,6 +675,12 @@
 </div>
 
 <script src="workbench-data.js"></script>
+<!-- 归一表 / 分类规则 / 安全库存 / 阈值（由 build_workbench_data.py 生成） -->
+<script src="wb-meta.js"></script>
+<!-- 零依赖表格读取与合并（可在 Node 下单独测试） -->
+<script src="xlsx-lite.js"></script>
+<script src="wb-merge.js"></script>
+<script src="wb-ui.js"></script>
 <script>
 /* ============================================================
    数据来源
@@ -679,7 +817,7 @@ function renderKPI(){
      foot:`${varieties} 种物料 · 跨单位合计，仅作趋势参考`},
     {cls:"",      label:"高价值设备在库", val:nf(highValue), foot:"主设备与光模块合计"},
     {cls:"danger",label:"短缺预警",     val:shortList.length, foot:shortList.filter(m=>m.stock===0).length+" 项已无库存"},
-    {cls:"warn",  label:"长期积压",     val:overList.length,  foot:"超 90 天无出库"},
+    {cls:"warn",  label:"长期积压",     val:overList.length,  foot:`超 ${OVER_DAYS} 天无出库`},
     {cls:health>=80?"ok":"warn", label:"库存健康度", val:health+"<small>%</small>",
      foot:health>=80?"整体可控，重点项已标出":"存在结构性风险"}
   ];
@@ -1018,6 +1156,7 @@ const VIEW_META = {
   trend:["库存变化","当日与历史快照比对"],
   report:["库存日报","数据明细 + 分析结论 + 预警建议"],
   push:["推送记录","日报定向推送历史"],
+  sources:["数据源","载入的表格、更新状态与在线同步"],
   about:["数据与说明","数据来源、字段口径与判定规则"]
 };
 function switchView(v){
@@ -1033,9 +1172,13 @@ function switchView(v){
 /* ============================================================ 初始化 */
 /* 数据来源标签 */
 function originTag(){
-  if (DATA_ORIGIN === 'local')   return '<span style="color:#15803d">本机数据</span>';
-  if (DATA_ORIGIN === 'bundled') return '<span style="color:#15803d">随页数据</span>';
-  return '<span style="color:#b45309">演示数据</span>';
+  switch (DATA_ORIGIN){
+    case 'dropped': return '<span style="color:#15803d">本机表格</span>';
+    case 'online':  return '<span style="color:#15803d">在线拉取</span>';
+    case 'local':   return '<span style="color:#15803d">本机数据</span>';
+    case 'bundled': return '<span style="color:#15803d">随页数据</span>';
+    default:        return '<span style="color:#b45309">演示数据</span>';
+  }
 }
 
 /* 重画全部依赖数据的界面（换数据后调用） */
@@ -1052,6 +1195,8 @@ function refreshUI(){
   renderOverstock(); renderLedger(); renderChange(); renderPush();
   lineChart($("#trendChart"), RAW_DATA.trend, RAW_DATA.safetyLevel);
   lineChart($("#trendChart2"), RAW_DATA.trend, RAW_DATA.safetyLevel);
+  // 数据变了，数据源面板与更新提醒也要跟着刷
+  if (window.WbUI) window.WbUI.renderSources();
 }
 
 function init(){
@@ -1067,9 +1212,14 @@ function init(){
   });
   $("#btnRun").addEventListener("click", runFlow);
   $("#btnRun2").addEventListener("click", runFlow);
-  $("#btnSync").addEventListener("click", onSyncClick);
+  $("#btnSync").addEventListener("click", () => {
+    // 优先走「多文件载入」：表格与数据文件都能吃
+    const p2 = document.getElementById("filePick2");
+    if (window.WbUI && p2) p2.click(); else onSyncClick();
+  });
   $("#filePick").addEventListener("change", onFilePicked);
   bindPWA();
+  if (window.WbUI) window.WbUI.boot();
 
   const bind = (sel, fn) => $(sel).addEventListener("input", fn);
   bind("#shortQ", renderShortage); bind("#shortLevel", renderShortage);
@@ -1142,6 +1292,8 @@ function applyData(obj, origin, fileName){
   DATA_SYNCED_AT = new Date().toLocaleString('zh-CN', {hour12:false}).slice(5);
   buildMaterials();
   refreshUI();
+  // 记住本次载入的结果，下次打开直接复用（源文件不必再拖一次）
+  if (window.WbUI && origin !== 'restore') window.WbUI.persistLast(obj, fileName || '');
 }
 
 function toast(msg, ok){
@@ -1206,17 +1358,28 @@ async function onFilePicked(e){
 
 /* 「数据与说明」页文案 */
 function sourceNote(){
+  if (DATA_ORIGIN === 'dropped')
+    return `当前数据由你拖入的表格在本机实时合并得到：<b>${escOf(DATA_FILE_NAME) || '(未记录)'}</b>，`
+      + `快照日期 ${RAW_DATA.snapshotDate}，同步于 ${DATA_SYNCED_AT || '—'}。`
+      + `解析与计算都在本页完成，数据未上传到任何地方。`;
+  if (DATA_ORIGIN === 'online')
+    return `当前数据从在线地址拉取：<code>${escOf(DATA_FILE_NAME)}</code>，`
+      + `快照日期 ${RAW_DATA.snapshotDate}。`;
   if (DATA_ORIGIN === 'local')
-    return `当前数据来自本机文件 <b>${DATA_FILE_NAME || '(已选文件)'}</b>，`
+    return `当前数据来自本机文件 <b>${escOf(DATA_FILE_NAME) || '(已选文件)'}</b>，`
       + `快照日期 ${RAW_DATA.snapshotDate}，同步于 ${DATA_SYNCED_AT || '—'}。`
       + `数据只存在于本页内存，未上传到任何地方。`;
   if (DATA_ORIGIN === 'bundled')
     return '当前数据随页面一起加载（本地打开时的 <code>workbench-data.js</code>）。'
       + '点右上角「⟳ 同步数据」可载入更新的一份。';
   return '当前是<b>内置演示数据</b>，仅供界面预览。'
-    + '点右上角「⟳ 同步数据」选择本机的数据文件即切换为真实数据。'
+    + '把台账表格拖到页面上即切换为真实数据。'
     + (supportsFS ? '选过一次后，页面会记住它。'
                   : '（当前浏览器不支持记住文件，每次同步需重新选择）');
+}
+function escOf(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 /* PWA：注册 Service Worker、接管安装按钮 */

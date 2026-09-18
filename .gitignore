@@ -11,6 +11,9 @@ material-system/src/*.xlsx
 # ---------- 生成的数据文件（绝不入库） ----------
 workbench-data.js
 workbench-data.json
+# wb-meta 含 303 条型号映射（等于物料目录）与安全库存，属业务数据
+wb-meta.js
+wb-meta.json
 
 # ---------- 本地配置（含集成商名单等真实信息） ----------
 material-system/src/suppliers.json
@@ -69,3 +72,14 @@ material-system/scratch/
 
 # ---------- 台账数据目录（本地使用，不入库） ----------
 /material-system/data/
+
+# ---------- 依赖与临时文件 ----------
+node_modules/
+.commitmsg.txt
+
+# ---------- 与本项目无关的其它任务产物 ----------
+/extract_jf.py
+/gen_docx.py
+/jf_ppt.txt
+/md2docx_gongwen.py
+/probe_charts.py

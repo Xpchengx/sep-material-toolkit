@@ -284,7 +284,90 @@ def build(src, snapshot, days, safe_path):
         'safe_src': safe_src,
         'src_rows': {'master': len(master), 'mapping': len(mapping),
                      'stock': len(stock), 'in': len(inb), 'out': len(oub)},
+        # 供 emit_meta 使用，不参与 emit_js / emit_json
+        '_meta': {'mapping': mapping, 'master': master, 'safe': safe_cfg},
     }
+
+
+def emit_meta(data, out_path, over_days=180, cover_ratio=0.3):
+    """
+    输出 wb-meta.json —— 浏览器端合并原始表格时要用的"规则与字典"。
+    这样归一表、分类规则、安全库存、物料主数据只在 Python 端维护一份，
+    页面端不重复实现，避免两条路径算出来对不上。
+
+    结构对齐 build() 的口径：
+      mapping[集成商][原始型号] = 标准型号      ← 精确匹配优先
+      mappingRaw[原始型号]      = 标准型号      ← 仅当该型号在所有集成商下唯一时才给出
+      master[标准型号]          = {code,name,unit}   ← 物料列表以此为准
+    """
+    mi = data.get('_meta') or {}
+    mapping_rows = mi.get('mapping') or []
+    master = mi.get('master') or []
+    safe_cfg = mi.get('safe') or {}
+
+    # 归一表：按集成商分组
+    by_sup = {}
+    raw2std = {}
+    for r in mapping_rows:
+        sup = (r.get('出现于集成商') or '').strip()
+        raw = (r.get('原始型号') or '').strip()
+        std = (r.get('标准型号') or '').strip()
+        if not (sup and raw and std):
+            continue
+        by_sup.setdefault(sup, {}).setdefault(raw, std)
+        raw2std.setdefault(raw, set()).add(std)
+
+    # 物料主数据
+    master_map = {}
+    for r in master:
+        std = (r.get('标准型号') or '').strip()
+        if not std:
+            continue
+        master_map[std] = {
+            'code': (r.get('标准编码') or '').strip(),
+            'name': (r.get('标准名称') or '').strip() or std,
+            'unit': (r.get('单位') or '').strip(),
+        }
+
+    # 集成商名单：从归一表的「出现于集成商」列拆出来，供页面识别拖入的文件
+    sups = sorted({p.strip()
+                   for r in mapping_rows
+                   for p in (r.get('出现于集成商') or '').replace('|', '/').split('/')
+                   if p.strip()})
+
+    payload = {
+        'generatedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'snapshotDate': str(data['snapshot']),
+        'thresholds': {'overDays': over_days, 'coverRatio': cover_ratio},
+        'categories': [[c, list(k)] for c, k in CAT_RULES],
+        'mapping': by_sup,
+        # 只在唯一映射时给出，与 Python 端 to_std 的兜底逻辑一致
+        'mappingRaw': {raw: next(iter(s)) for raw, s in raw2std.items() if len(s) == 1},
+        'master': master_map,
+        'safety': {k: float(v) for k, v in safe_cfg.items()},
+        'suppliers': sups,
+        'stats': {
+            'mapping': sum(len(v) for v in by_sup.values()),
+            'mappingRaw': len(raw2std),
+            'master': len(master_map),
+            'safetySet': len(safe_cfg),
+            'suppliers': len(sups),
+        },
+    }
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(',', ':'))
+
+    # 同名 .js 版本：页面用 <script src> 引入。
+    # 不能只给 .json —— 本地 file:// 打开时 fetch 会被跨域策略拦掉。
+    js_path = os.path.splitext(out_path)[0] + '.js'
+    with open(js_path, 'w', encoding='utf-8') as f:
+        f.write('/* 由 build_workbench_data.py 生成：归一表 / 分类规则 / 安全库存 / 阈值 */\n')
+        f.write(f'/* 生成于 {payload["generatedAt"]} */\n')
+        f.write('window.WB_META = ')
+        json.dump(payload, f, ensure_ascii=False, separators=(',', ':'))
+        f.write(';\n')
+
+    return payload['stats']
 
 
 def emit_js(data, out_path):
@@ -428,6 +511,10 @@ def main():
     json_out = os.path.splitext(a.out)[0] + '.json'
     n = emit_json(data, json_out)
 
+    # wb-meta.json：页面端合并原始表格时用的规则与字典
+    meta_out = os.path.join(os.path.dirname(os.path.abspath(json_out)), 'wb-meta.json')
+    st = emit_meta(data, meta_out)
+
     created = emit_safe_template(data, a.safe_config, reset=a.reset_safe)
 
     ms = data['materials']
@@ -448,6 +535,7 @@ def main():
     print(f"数据源行数 : {data['src_rows']}")
     print(f"输出 -> {a.out}")
     print(f"        {json_out}  ({n:,} 字符，供页面文件选择器读取)")
+    print(f"        {meta_out}  (归一表 {st['mapping']} 条、安全库存 {st['safetySet']} 项，供页面端合并原始表格)")
 
     if a.bundle:
         # 优先用仓库根的 index.html（PWA 版），回退到 output/ 里的旧模板
