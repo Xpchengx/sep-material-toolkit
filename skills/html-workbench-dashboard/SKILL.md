@@ -329,6 +329,70 @@ window.fetch = async () => { throw new Error('测试环境不联网'); };
 > 注意：`let` / `const` 声明的顶层变量**不会**挂到 `window` 上。
 > 测试里访问 `window.MATERIALS` 得到 `undefined` 是正常的，要读 DOM 文本验证。
 
+## 让网页按钮触发本机脚本（本机同步代理）
+
+用户常会问：「网页上点一下，让它去跑脚本更新数据」。**这件事网页做不到** ——
+浏览器不允许网页执行本机程序，这是硬边界，自定义协议也救不了
+（页面拿不到执行结果、做不了进度）。正确做法是在本机放一个**只监听 127.0.0.1 的小服务**：
+
+```
+网页点「同步」 → POST /api/sync → 本机服务依次跑脚本 → 轮询 /api/status 看进度 → 取回结果
+```
+
+### 最小接口集
+
+| 接口 | 作用 |
+|---|---|
+| `GET /` | 把项目当静态站点服务 —— 打开 `http://localhost:8765/` 就是**同源**的完整应用，零配置 |
+| `GET /api/status` | 运行状态 + 每步进度 + 数据摘要（前端轮询这个） |
+| `POST /api/sync` | 触发同步；已在跑返回 409；立刻返回后由前端轮询 |
+| `GET /api/data` | 返回最新生成的数据文件 |
+| `GET /api/config` | 步骤清单（**不回传本机路径**） |
+
+用 `ThreadingHTTPServer` + 一个后台线程跑步骤即可，不必引框架。
+每步用 `subprocess.run(capture_output=True)`，只保留输出**尾部**（20 行左右）回传，
+否则失败日志会撑爆响应。
+
+### 顺手解决的两个体验问题
+
+1. **页面按相对路径找的生成文件**（如 `workbench-data.js`）实际在 `output/` 下 →
+   服务端做个 `FILE_MAP` 把 `/workbench-data.js` 映射过去，页面不用改。
+2. **配置里的 `python` 换成本进程解释器**（`sys.executable`），
+   否则用户环境里 PATH 没有 `python` 就起不来。
+
+### 安全（缺一不可，别图省事）
+
+```python
+# ① 只绑本机，局域网与公网都访问不到
+ThreadingHTTPServer(('127.0.0.1', port), Handler)
+
+# ② 校验 Host 头，挡 DNS rebinding
+host = (headers.get('Host') or '').split(':')[0].lower()
+if host not in ('localhost', '127.0.0.1', '::1'): 403
+
+# ③ CORS 只放行白名单，绝不要用 '*' —— 否则任意网站都能读走你的数据
+if origin in ALLOW_ORIGINS: ACAO = origin
+
+# ④ Chrome 的 Private Network Access：公网页面访问本机必须显式同意，
+#    不加这个头，跨源请求会被浏览器直接掐掉（且报错信息很不直观）
+'Access-Control-Allow-Private-Network: true'
+
+# ⑤ 静态文件服务防目录穿越
+target = os.path.normpath(os.path.join(ROOT, rel))
+if not target.startswith(os.path.normpath(ROOT)): 403
+```
+
+> `http://localhost` / `http://127.0.0.1` 属于「potentially trustworthy origin」，
+> 所以 **HTTPS 页面访问它是允许的**，不会被当混合内容拦掉。
+
+### 前端侧
+
+- 启动时探测一次（短超时 2.5s），失败就显示**启动命令**，不要静默失败
+- 同步中**锁定按钮**并显示逐步进度，别让用户以为卡死
+- 失败时把**失败那一步的输出尾部**显示出来 —— 用户要的是「哪一步错了」，不是「失败了」
+- 生成物（如规则文件）变了要提示**刷新页面**，因为它们是 `<script src>` 一次性加载的
+- 顶栏按钮做**降级**：代理不在就退回「拖拽/选文件」，两条路都要能走通
+
 ## 常见坑
 
 | 坑 | 处理 |
