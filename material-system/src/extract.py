@@ -7,12 +7,38 @@ from openpyxl import load_workbook
 # （本地使用时把 LEDGER_DIR 指向你的台账所在目录）
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.environ.get('LEDGER_DIR') or os.path.join(_REPO, 'data')
-SRC = {
-    "集成商C": BASE + r"\集成商\集成商C\集成商C库存(9月8日).xlsx",
-    "集成商A": BASE + r"\集成商\集成商A\上海集成商A材料库存(9月1日）.xlsx",
-    "集成商B": BASE + r"\集成商\集成商B\集成商B-材料库存2026-8-26.xlsx",
-    "采购": BASE + r"\采购与设计量与到货量.xlsx",
-}
+
+# 源文件路径：**优先读 pick_sources.py 生成的 sources.json**（它会自动挑出
+# 每个集成商最新的一份），没有该文件时回落到下面的硬编码路径。
+# 这样新台账到了不用改代码，跑一次 pick_sources.py 就行。
+_SRC_CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sources.json')
+ROLES = {}          # 形如 {'A': '集成商A', 'B': '集成商B', 'C': '集成商C'}
+if os.path.exists(_SRC_CFG):
+    with io.open(_SRC_CFG, encoding='utf-8') as _f:
+        _cfg = json.load(_f)
+    SRC = _cfg.get('sources') or {}
+    ROLES = _cfg.get('roles') or {}
+    SRC_FROM = f'sources.json（{len(SRC)} 项，{_cfg.get("generatedAt", "?")}）'
+else:
+    SRC = {
+        "集成商C": BASE + r"\集成商\集成商C\集成商C库存(9月8日).xlsx",
+        "集成商A": BASE + r"\集成商\集成商A\上海集成商A材料库存(9月1日）.xlsx",
+        "集成商B": BASE + r"\集成商\集成商B\集成商B-材料库存2026-8-26.xlsx",
+        "采购": BASE + r"\采购与设计量与到货量.xlsx",
+    }
+    SRC_FROM = '脚本内硬编码路径（建议改用 pick_sources.py）'
+
+# ---------------------------------------------------------------------------
+# 三家台账的**格式**各不相同，下面按「角色」分支，而不是按名字。
+# 角色到实际名称的对应由 sources.json 的 roles 给出；没给就沿用仓库里的脱敏名。
+#   角色 A：无「月份」列；盘点表的 账面/实盘/差异 在 v[3..5]
+#   角色 B：有「月份」列；盘点表列位在 v[6..8]
+#   角色 C：有「设计明细」表；盘点表列位在 v[4..6]
+# 这样换集成商、或把标签改成脱敏名，都不用改代码。
+# ---------------------------------------------------------------------------
+ROLE_A = ROLES.get('A') or "集成商A"
+ROLE_B = ROLES.get('B') or "集成商B"
+ROLE_C = ROLES.get('C') or "集成商C"
 OUT = r"C:\Users\qazws\WorkBuddy\2026-09-09-09-19-37\material-system\out"
 os.makedirs(OUT, exist_ok=True)
 
@@ -20,6 +46,8 @@ report = []
 def log(*a):
     s = " ".join(str(x) for x in a)
     report.append(s)
+
+log(f"源文件来源: {SRC_FROM}")
 
 
 def txt(v):
@@ -92,7 +120,10 @@ def w(name, header, data):
 inbound, outbound, returns, stock, invent = [], [], [], [], []
 stock_seen = set()
 
-for tag, path in [(k, SRC[k]) for k in ["集成商C", "集成商A", "集成商B"]]:
+for tag, path in [(k, SRC[k]) for k in [ROLE_C, ROLE_A, ROLE_B]]:
+    if not path or not os.path.exists(path):
+        log(f"\n## {tag}  !! 源文件不存在，跳过：{path}")
+        continue
     log(f"\n## {tag}")
     wb = load_workbook(path, read_only=True, data_only=True)
 
@@ -128,8 +159,8 @@ for tag, path in [(k, SRC[k]) for k in ["集成商C", "集成商A", "集成商B"
             if rn == 1:
                 continue
             vals = vals + [""] * 8
-            # 集成商B多一列「月份」：日期|月份|型号|数量|单位|材料来源|项目|备注
-            if tag == "集成商B":
+            # 角色 B 多一列「月份」：日期|月份|型号|数量|单位|材料来源|项目|备注
+            if tag == ROLE_B:
                 d, mon, model, qty, unit, frm, proj, rmk = vals[0], vals[1], vals[2], num(vals[3]), vals[4], vals[5], vals[6], vals[7]
             else:
                 d, mon, model, qty, unit, frm, proj, rmk = vals[0], "", vals[1], num(vals[2]), vals[3], vals[4], vals[5], vals[6]
@@ -147,7 +178,7 @@ for tag, path in [(k, SRC[k]) for k in ["集成商C", "集成商A", "集成商B"
             if rn == 1:
                 continue
             vals = vals + [""] * 11
-            if tag == "集成商B":
+            if tag == ROLE_B:
                 mon, d, model, qty, proj, to, who, rmk, yf, tb = (
                     vals[0], vals[1], vals[2], num(vals[3]), vals[4], vals[5], vals[6], vals[7], vals[8], vals[9])
             else:
@@ -195,10 +226,10 @@ for tag, path in [(k, SRC[k]) for k in ["集成商C", "集成商A", "集成商B"
                 continue
             v = vals + [""] * 10
             nm, model, unit, book, real, diff = v[1], "", v[2], None, None, None
-            if tag == "集成商C":
+            if tag == ROLE_C:
                 model, unit = v[2], v[3]
                 book, real, diff = num(v[4]), num(v[5]), num(v[6])
-            elif tag == "集成商A":
+            elif tag == ROLE_A:
                 book, real, diff = num(v[3]), num(v[4]), num(v[5])
             else:
                 book, real, diff = num(v[6]), num(v[7]), num(v[8])
@@ -216,8 +247,8 @@ n_ret = w("退料明细", ["集成商", "类型", "日期", "型号", "数量", 
 n_stk = w("集成商库存汇总", ["集成商", "名称", "型号", "单位", "期初库存", "入库", "出库", "库存"], stock)
 n_inv = w("盘点记录", ["集成商", "盘点表", "物料名称", "型号", "单位", "账面数量", "实盘数量", "差异", "备注"], invent)
 
-# ==================== 2. 集成商C设计明细 ====================
-log("\n## 集成商C 设计明细")
+# ==================== 2. 角色 C 的设计明细 ====================
+log(f"\n## {ROLE_C} 设计明细")
 # 站点 -> 项目 映射：取自出库明细（每行都有站点与项目，比设计明细的项目列可靠）
 _tmp = {}
 for r in outbound:
@@ -227,7 +258,7 @@ for r in outbound:
 site2proj = {k: max(v.items(), key=lambda x: x[1])[0] for k, v in _tmp.items()}
 log(f"  站点→项目 映射（来自出库明细）: {len(site2proj)} 条")
 
-wb = load_workbook(SRC["集成商C"], read_only=True, data_only=True)
+wb = load_workbook(SRC[ROLE_C], read_only=True, data_only=True)
 ws = wb["设计明细"]
 design = []
 cur_site, cur_proj = "", ""
@@ -246,7 +277,7 @@ for rn, vals in rows_of(ws):
         continue
     # 项目优先取站点映射，其次用设计明细自带的
     proj_final = site2proj.get(cur_site) or cur_proj
-    design.append(["集成商C", proj_final, cur_site, model, qty, rmk])
+    design.append([ROLE_C, proj_final, cur_site, model, qty, rmk])
 wb.close()
 n_des = w("站点设计量明细", ["集成商", "项目", "站点", "型号", "设计数量", "备注"], design)
 
@@ -386,7 +417,7 @@ log("\n" + "=" * 50)
 log("汇总：")
 log(f"  入库明细 {n_in} / 出库明细 {n_out} / 退料 {n_ret}")
 log(f"  集成商汇总 {n_stk} / 盘点 {n_inv}")
-log(f"  集成商C站点设计明细 {n_des}")
+log(f"  {ROLE_C} 站点设计明细 {n_des}")
 log(f"  项目采购到货明细 {n_pur}")
 log(f"  物料主数据候选 {n_mat}")
 log(f"  项目档案 {n_pj} / 站点档案 {n_site}")

@@ -1,0 +1,45 @@
+{
+  "_说明": "复制本文件为 wb-sync.config.json 再改。真实路径与集成商名只存在本地，repo 保持脱敏。",
+  "_复制方法": "copy wb-sync.config.example.json wb-sync.config.json",
+
+  "port": 8765,
+
+  "_ledgerDir": "台账根目录，其下应有 集成商/<各集成商>/ 层级",
+  "ledgerDir": "D:\\台账\\材料台账",
+
+  "_suppliers": "目录名 -> 角色。角色代表台账的三种格式，代码按角色分支处理，与名称无关：",
+  "_角色A": "无「月份」列；盘点表 账面/实盘/差异 在第 4~6 列",
+  "_角色B": "有「月份」列；盘点表列位在第 7~9 列",
+  "_角色C": "有「设计明细」表；盘点表列位在第 5~7 列",
+  "_换集成商": "换人或改名都不用改代码，只要在这里把目录名对到正确的角色上",
+  "suppliers": {
+    "集成商C": "C",
+    "集成商A": "A",
+    "集成商B": "B"
+  },
+
+  "_标签说明": "上面字典的 key 既用于找目录，也会写进 CSV 当集成商名。若要把产物脱敏，把 key 改成 集成商A/B/C 并把目录名另配（见 README）",
+
+  "_purchaseFile": "采购与设计量文件，相对 ledgerDir；没有就留空",
+  "purchaseFile": "采购与设计量与到货量.xlsx",
+
+  "_requireToken": "true 则跨源调用需要令牌（同源不需要）。本机自用一般 false 即可",
+  "requireToken": false,
+  "token": "",
+
+  "allowOrigins": [
+    "https://xpchengx.github.io",
+    "http://localhost",
+    "http://127.0.0.1"
+  ],
+
+  "stepTimeoutSec": 900,
+
+  "_steps": "同步时依次执行的命令。cmd 里的 python 会自动换成本进程的解释器；cwd 相对仓库根",
+  "steps": [
+    { "name": "挑最新台账文件", "cwd": "material-system", "cmd": ["python", "src/pick_sources.py"] },
+    { "name": "抽取台账",       "cwd": "material-system", "cmd": ["python", "src/extract.py"] },
+    { "name": "型号归一",       "cwd": "material-system", "cmd": ["python", "src/normalize.py"] },
+    { "name": "生成工作台数据", "cwd": "material-system", "cmd": ["python", "src/build_workbench_data.py"] }
+  ]
+}

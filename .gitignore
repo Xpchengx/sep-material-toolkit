@@ -1,12 +1,33 @@
-# ============================================================
-# 本仓库只保存工具代码，不保存任何业务数据
-# ============================================================
+# ============================================================================
+#  白名单式忽略 —— 根目录只放行「本项目自己的文件」
+# ----------------------------------------------------------------------------
+#  为什么反过来写：这个目录里同时在放别的任务的文件（编辑脚本、导出文本等），
+#  用黑名单列不胜列，还得每次补一行 —— 漏一次就可能把不相干内容推到公开仓库。
+#  白名单是「默认拒绝」，新出现的无关文件自动被挡住。
+#  本仓库只保存工具代码，不保存任何业务数据。
+# ============================================================================
+
+/*
+!/.gitignore
+!/README.md
+!/index.html
+!/manifest.webmanifest
+!/sw.js
+!/xlsx-lite.js
+!/wb-merge.js
+!/wb-ui.js
+!/wb_sync_agent.py
+!/wb-sync.config.example.json
+!/icons/
+!/docs/
+!/material-system/
+!/skills/
 
 # ---------- 台账与明细数据 ----------
-material-system/out/
-material-system/src/*.xlsx
 *.csv
 !docs/samples/*.csv
+/material-system/out/
+/material-system/src/*.xlsx
 
 # ---------- 生成的数据文件（绝不入库） ----------
 workbench-data.js
@@ -15,71 +36,44 @@ workbench-data.json
 wb-meta.js
 wb-meta.json
 
-# ---------- 本地配置（含集成商名单等真实信息） ----------
-material-system/src/suppliers.json
+# ---------- 本机配置（含真实台账路径与集成商名） ----------
+wb-sync.config.json
+/material-system/src/sources.json
+/material-system/src/suppliers.json
 
-# ---------- 生成的交付物（含真实内容） ----------
-output/*.docx
-output/*.xlsx
-output/*.pdf
-output/*.zip
-output/*.html
-output/站址确认单-分区县/
-output/_*
-output/~$*
-workbench-data.js
+# ---------- 交付物与参考目录（含真实内容） ----------
+/output/
+/.tmp/
+/material-system/data/
+/material-system/scratch/
 
-# ---------- 临时与缓存 ----------
-.tmp/
+# ---------- 本地记忆与运行时（含单位/人名等内部信息） ----------
+/.workbuddy/
+/.claude/
+.DS_Store
+Thumbs.db
+
+# ---------- 依赖与临时文件 ----------
+node_modules/
+package.json
+package-lock.json
+.commitmsg.txt
+__pycache__/
+*.pyc
 *.log
 *.tmp
 ~$*
-__pycache__/
-*.pyc
 .venv/
 venv/
-
-# ---------- 本地记忆与运行时（含单位/人名等内部信息） ----------
-.workbuddy/
-.claude/
-.DS_Store
-Thumbs.db
 
 # ---------- 编辑器 ----------
 .idea/
 .vscode/
 *.swp
 
-# ---------- 根目录临时脚本（下划线前缀） ----------
+# ---------- 根目录临时脚本（下划线前缀，含本机路径） ----------
 /_*
 
-# ---------- 与本项目无关的遗留文件（其它任务产物，含内部信息） ----------
-/edit_ppt.py
-/extract_final.py
-/extract_full.py
-/md2docx.py
-/merge_ppts.py
-/migrate_workbuddy_finalize.ps1
-/final_ppt.txt
-/full_text.txt
-
-# ---------- 其它工具留下的参考目录 ----------
+# ---------- 其它工具留下的隐藏参考目录 ----------
 /output/.*ref/
 /output/.*/
-
-# ---------- 一次性诊断脚本（含本机路径） ----------
-material-system/scratch/
-
-# ---------- 台账数据目录（本地使用，不入库） ----------
-/material-system/data/
-
-# ---------- 依赖与临时文件 ----------
-node_modules/
-.commitmsg.txt
-
-# ---------- 与本项目无关的其它任务产物 ----------
-/extract_jf.py
-/gen_docx.py
-/jf_ppt.txt
-/md2docx_gongwen.py
-/probe_charts.py

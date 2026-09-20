@@ -267,6 +267,37 @@
     font-size:13px; color:var(--muted);
   }
   .drop-hint b{color:var(--primary)}
+
+  /* ---------- 本机同步代理 ---------- */
+  #agentCard.off{border-color:var(--line)}
+  .ag-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .ag-head h2{margin:0; font-size:15px}
+  #agentOffline{
+    margin-top:12px; padding:13px 15px; border-radius:9px;
+    background:var(--warn-soft); border:1px solid #f0d9a8; font-size:12.5px; line-height:1.85;
+  }
+  #agentOffline code{
+    background:#fff; border:1px solid var(--line); border-radius:5px;
+    padding:2px 7px; font-size:12px;
+  }
+  #agentSteps{margin-top:12px; font-size:12.5px}
+  .ag-row{color:var(--muted); padding:3px 0; line-height:1.7}
+  .ag-step{display:flex; align-items:center; gap:8px; padding:3px 0; color:var(--muted)}
+  .ag-step.done{color:var(--ok)}
+  .ag-step.failed{color:var(--danger); font-weight:600}
+  .ag-step.running{color:var(--primary); font-weight:600}
+  .ag-step.skipped{color:var(--faint)}
+  .ag-ms{margin-left:auto; font-variant-numeric:tabular-nums; color:var(--faint); font-size:11.5px}
+  .ag-dot{width:8px; height:8px; border-radius:50%; display:inline-block}
+  .ag-dot.run{background:var(--primary); animation:agp 1s infinite}
+  .ag-dot.ok{background:var(--ok)}
+  .ag-dot.bad{background:var(--danger)}
+  @keyframes agp{0%,100%{opacity:1}50%{opacity:.25}}
+  #agentLog{
+    margin-top:12px; padding:11px 13px; border-radius:8px; font-size:12px;
+    background:#2b2f36; color:#e6e6e6; white-space:pre-wrap; line-height:1.65;
+    max-height:260px; overflow:auto; font-family:ui-monospace,Consolas,monospace;
+  }
 </style>
 </head>
 <body>
@@ -579,7 +610,52 @@
             </div>
             <div class="note">
               按「数据日期」距今多少天算。数据日期取表格里最新的流水日期，或文件名里的日期
-              （如 <code>华为_库存_20260908.xlsx</code>）。库存表建议 7 天、流水表建议 15 天。
+              （如 <code>集成商A_库存_20260908.xlsx</code>）。库存表建议 7 天、流水表建议 15 天。
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="agentCard">
+          <div class="card-h">
+            <h2>本机同步代理</h2>
+            <div class="spacer"></div>
+            <span class="tag bad" id="agentChip">未连接</span>
+          </div>
+          <div class="card-b">
+            <p>网页不能直接执行本机程序（浏览器安全边界），所以由本机一个只监听
+               <code>127.0.0.1</code> 的小服务代跑脚本。启动它以后，点「立即同步」就会：
+               <b>挑最新台账 → 抽取 → 型号归一 → 生成工作台数据</b>，并把进度实时显示在这里。</p>
+
+            <div class="src-tools" style="margin-top:12px">
+              <label>服务地址</label>
+              <input type="text" id="agentUrl" placeholder="http://127.0.0.1:8765">
+              <label>令牌</label>
+              <input type="text" id="agentToken" style="max-width:130px" placeholder="可留空">
+              <button class="btn" id="btnAgentProbe">测试连接</button>
+              <button class="btn primary" id="btnAgentSync" disabled>⟳ 立即同步</button>
+              <span id="agentReload" style="display:none">
+                <button class="btn" id="btnReloadPage">刷新页面以应用新规则</button>
+              </span>
+            </div>
+
+            <div id="agentSteps"></div>
+            <div id="agentLog" style="display:none"></div>
+
+            <div id="agentOffline">
+              <b>代理未连接</b> —— 在项目目录下打开命令行执行：
+              <div style="margin:8px 0 4px">
+                <code>python wb_sync_agent.py</code>
+              </div>
+              首次使用先复制配置模板并填写台账路径：
+              <div style="margin:8px 0 4px">
+                <code>copy wb-sync.config.example.json wb-sync.config.json</code>
+              </div>
+              启动后浏览器打开 <code>http://localhost:8765/</code>，那里是同源的完整工作台，
+              体验最顺（本页是 GitHub 上的版本，属跨源访问，同样可用）。
+              <br><br>
+              <b>为什么不用别的办法：</b>自定义协议（<code>wb-sync://</code>）在页面上无法得知
+              执行结果，也做不了进度；纯文件监听则做不到「点一下就开始」。
+              本机小服务是唯一既能触发、又能拿到进度与结果的方案。
             </div>
           </div>
         </div>
@@ -588,7 +664,7 @@
           <div class="card-h"><h2>在线地址同步</h2></div>
           <div class="card-b">
             <div class="src-tools">
-              <input type="text" id="onlineUrl" placeholder="https://…/workbench-data.json　或　https://…/华为_库存_20260908.xlsx">
+              <input type="text" id="onlineUrl" placeholder="https://…/workbench-data.json　或　https://…/集成商A_库存_20260908.xlsx">
               <button class="btn primary" id="btnOnline">⟳ 在线同步</button>
             </div>
             <div id="onlineHint" class="note" style="display:none">
@@ -1213,9 +1289,8 @@ function init(){
   $("#btnRun").addEventListener("click", runFlow);
   $("#btnRun2").addEventListener("click", runFlow);
   $("#btnSync").addEventListener("click", () => {
-    // 优先走「多文件载入」：表格与数据文件都能吃
-    const p2 = document.getElementById("filePick2");
-    if (window.WbUI && p2) p2.click(); else onSyncClick();
+    // 代理在 → 让它跑脚本；不在 → 退回选文件/拖拽
+    if (window.WbUI) WbUI.syncSmart(); else onSyncClick();
   });
   $("#filePick").addEventListener("change", onFilePicked);
   bindPWA();

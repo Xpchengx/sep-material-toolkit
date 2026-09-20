@@ -18,7 +18,8 @@
   const LS_KEY = 'wb-ui-settings';
 
   // 过期阈值（天）：数据日期距今天数超过 bad 判为「长期未更新」
-  const DEF_SETTINGS = { warnDays: 7, badDays: 15, onlineUrl: '', autoLoad: true };
+  const DEF_SETTINGS = { warnDays: 7, badDays: 15, onlineUrl: '', autoLoad: true,
+                         agentUrl: '', agentToken: '' };
 
   let settings = Object.assign({}, DEF_SETTINGS);
   let registry = [];        // 本次会话载入的原始表格（内存中，含解析结果）
@@ -125,7 +126,7 @@
     const sups = root.WB_SUPPLIERS
       || (root.WB_META && root.WB_META.suppliers)
       || [];
-    // 长名字优先，避免「中兴」误配到「中兴通讯」这类更长的名字上
+    // 长名字优先，避免短名误配到以它为前缀的更长名字上
     for (const x of sups.slice().sort((a, b) => b.length - a.length)) {
       if (x && s.includes(x)) { supplier = x; break; }
     }
@@ -467,6 +468,174 @@
     const ou = document.getElementById('onlineUrl');
     if (ou) { ou.value = settings.onlineUrl || ''; ou.addEventListener('change', () => {
       settings.onlineUrl = ou.value.trim(); saveSettings(); }); }
+
+    // ---- 本机同步代理 ----
+    const ab = document.getElementById('btnAgentSync');
+    if (ab) ab.addEventListener('click', runAgentSync);
+    const ap = document.getElementById('btnAgentProbe');
+    if (ap) ap.addEventListener('click', () => probeAgent(false));
+    const au = document.getElementById('agentUrl');
+    if (au) {
+      au.value = settings.agentUrl || AGENT_DEFAULT;
+      au.addEventListener('change', () => {
+        settings.agentUrl = au.value.trim(); saveSettings(); probeAgent(false);
+      });
+    }
+    const at = document.getElementById('agentToken');
+    if (at) {
+      at.value = settings.agentToken || '';
+      at.addEventListener('change', () => {
+        settings.agentToken = at.value.trim(); saveSettings(); probeAgent(false);
+      });
+    }
+    const rl = document.getElementById('btnReloadPage');
+    if (rl) rl.addEventListener('click', () => location.reload());
+  }
+
+  // ------------------------------------------------------------ 本机同步代理
+  /*
+     浏览器不允许网页直接执行本机程序，所以中间放一个只监听 127.0.0.1 的小服务：
+     点「同步」→ POST /api/sync → 它跑脚本 → 轮询进度 → 完成后取回新数据。
+
+     若页面本身就是该服务提供的（http://localhost:8765/），走同源，无需任何配置。
+     若是 GitHub Pages 上那份，则跨源访问，由服务端的 CORS 白名单放行。
+  */
+  const AGENT_DEFAULT = 'http://127.0.0.1:8765';
+  let agentOK = false, agentLast = null, agentTimer = null;
+
+  function agentBase() {
+    // 页面由代理自己提供 → 同源，用相对路径
+    if (/^https?:$/.test(location.protocol) &&
+        /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return '';
+    return String(settings.agentUrl || AGENT_DEFAULT).replace(/\/+$/, '');
+  }
+  function agentHeaders() {
+    const h = {};
+    if (settings.agentToken && agentBase()) h['X-WB-Token'] = settings.agentToken;
+    return h;
+  }
+
+  async function probeAgent(quiet) {
+    try {
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 2600);
+      const res = await fetch(agentBase() + '/api/status',
+        { cache: 'no-store', signal: ctl.signal, headers: agentHeaders() });
+      clearTimeout(to);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const st = await res.json();
+      agentOK = true; agentLast = st;
+      if (!quiet) renderAgent(st, null);
+      else renderAgent(st, null);
+      return st;
+    } catch (e) {
+      agentOK = false;
+      renderAgent(null, e);
+      return null;
+    }
+  }
+
+  async function runAgentSync() {
+    if (!agentOK) { toast('本机同步代理没连上，请先启动它（见下方说明）', false); return; }
+    try {
+      const res = await fetch(agentBase() + '/api/sync',
+        { method: 'POST', cache: 'no-store', headers: agentHeaders() });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 409) toast('已经有一个同步在进行中');
+      else if (!res.ok) throw new Error(j.error || ('HTTP ' + res.status));
+      else toast('同步已开始', true);
+    } catch (e) {
+      toast('启动同步失败：' + e.message, false);
+      return;
+    }
+    // 锁定按钮，轮询进度
+    const btn = document.getElementById('btnAgentSync');
+    if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
+    clearInterval(agentTimer);
+    agentTimer = setInterval(async () => {
+      const st = await probeAgent(true);
+      if (!st) return;                       // 代理掉线，等下一轮
+      if (!st.sync.running && st.sync.finishedAt) {
+        clearInterval(agentTimer); agentTimer = null;
+        if (btn) { btn.disabled = false; btn.textContent = '⟳ 立即同步'; }
+        await afterAgentSync(st);
+      }
+    }, 1200);
+  }
+
+  async function afterAgentSync(st) {
+    if (st.sync.ok) {
+      let got = false;
+      try {
+        const res = await fetch(agentBase() + '/api/data',
+          { cache: 'no-store', headers: agentHeaders() });
+        if (res.ok) {
+          const obj = await res.json();
+          applyWorkbench(obj, 'local', '本机同步代理');
+          got = true;
+        }
+      } catch (e) { /* 下面统一提示 */ }
+      toast(got ? '同步完成，数据已更新' : '同步成功，但取数失败，请刷新页面', got);
+      // 归一表/安全库存也在同步中重算过，页面里的 wb-meta.js 还是旧的 → 提示刷新
+      const hint = document.getElementById('agentReload');
+      if (hint) hint.style.display = '';
+    } else {
+      toast('同步失败：' + (st.sync.error || '未知错误'), false);
+      const failed = (st.sync.steps || []).find(s => s.status === 'failed');
+      if (failed && failed.tail) {
+        const box = document.getElementById('agentLog');
+        if (box) {
+          box.style.display = '';
+          box.textContent = `【${failed.name}】失败\n` + failed.tail;
+        }
+      }
+    }
+    await renderSources();
+  }
+
+  function renderAgent(st, err) {
+    const chip = document.getElementById('agentChip');
+    const steps = document.getElementById('agentSteps');
+    const tips = document.getElementById('agentOffline');
+    const card = document.getElementById('agentCard');
+    if (card) card.classList.toggle('off', !st);
+
+    if (chip) {
+      chip.className = 'tag ' + (st ? 'ok' : 'bad');
+      chip.textContent = st ? '已连接' : '未连接';
+    }
+    if (tips) tips.style.display = st ? 'none' : '';
+
+    const btn = document.getElementById('btnAgentSync');
+    if (btn && !agentTimer) { btn.disabled = !st; }
+
+    if (steps) {
+      if (!st) { steps.innerHTML = ''; }
+      else {
+        const sy = st.sync || {};
+        const items = [];
+        if (sy.running) {
+          items.push(`<div class="ag-row"><span class="ag-dot run"></span>同步进行中…（${sy.startedAt || ''}）</div>`);
+        } else if (sy.finishedAt) {
+          items.push(`<div class="ag-row"><span class="ag-dot ${sy.ok ? 'ok' : 'bad'}"></span>`
+            + `${sy.ok ? '上次同步成功' : '上次同步失败'}　${sy.finishedAt}</div>`);
+        } else {
+          items.push('<div class="ag-row dim">本次会话还没跑过同步</div>');
+        }
+        for (const s of (sy.steps || [])) {
+          const icon = { done: '✓', failed: '✗', running: '◐', pending: '·', skipped: '—' }[s.status] || '·';
+          const ms = s.ms ? `${(s.ms / 1000).toFixed(1)}s` : '';
+          items.push(`<div class="ag-step ${s.status}"><span>${icon}</span> ${esc(s.name)}`
+            + `<span class="ag-ms">${ms}</span></div>`);
+        }
+        const d = st.data || {};
+        if (d.exists) {
+          items.push(`<div class="ag-row dim">当前数据：快照 ${esc(d.snapshotDate || '?')}　`
+            + `${d.materials || 0} 种物料　生成于 ${esc(d.mtime || '?')}</div>`);
+        }
+        steps.innerHTML = items.join('');
+      }
+    }
   }
 
   // ------------------------------------------------------------ 启动
@@ -484,6 +653,15 @@
       }
     } catch (e) {}
     await renderSources();
+    await probeAgent(true);          // 探一下本机同步代理在不在
+  }
+
+  /** 供页面顶栏按钮使用：代理在就用代理，不在就退回选文件 */
+  function syncSmart() {
+    if (agentOK) return runAgentSync();
+    const p2 = document.getElementById('filePick2');
+    if (p2) p2.click();
+    else toast('本机同步代理未连接，请拖入表格或先启动代理', false);
   }
 
   /** 保存合并结果，供下次打开时直接复用 */
@@ -492,5 +670,7 @@
   }
 
   root.WbUI = { boot, addFiles, recompute, renderSources, staleList, syncOnline,
-                get settings() { return settings; }, persistLast, esc, daysSince };
+                syncSmart, runAgentSync, probeAgent, persistLast, esc, daysSince,
+                get agentConnected() { return agentOK; },
+                get settings() { return settings; } };
 })(typeof window !== 'undefined' ? window : globalThis);
