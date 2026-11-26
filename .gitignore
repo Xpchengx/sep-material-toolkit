@@ -14,14 +14,23 @@
 !/manifest.webmanifest
 !/sw.js
 !/xlsx-lite.js
+!/xlsx-write-lite.js
 !/wb-merge.js
+!/wb-transfer.js
 !/wb-ui.js
 !/wb_sync_agent.py
 !/wb-sync.config.example.json
 !/icons/
-!/docs/
+!/docs/数据管理规范.md
 !/material-system/
 !/skills/
+
+# ---------- 含真实单位 / 集成商名，只在本地用，不入库 ----------
+/material-system/src/merge_monthly.py
+/material-system/src/monthly_data.py
+/material-system/src/monthly_docx.py
+/material-system/src/build_73_plan.py
+/material-system/src/build_73_transfer.py
 
 # ---------- 台账与明细数据 ----------
 *.csv

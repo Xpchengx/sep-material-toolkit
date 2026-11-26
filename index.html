@@ -298,6 +298,44 @@
     background:#2b2f36; color:#e6e6e6; white-space:pre-wrap; line-height:1.65;
     max-height:260px; overflow:auto; font-family:ui-monospace,Consolas,monospace;
   }
+
+  /* ---------- 物资调拨 ---------- */
+  .tf-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px}
+  .tf-slot{
+    border:1.5px dashed var(--line); border-radius:10px; padding:13px 14px;
+    background:var(--gray-soft); cursor:pointer; transition:.15s; min-height:104px;
+  }
+  .tf-slot:hover,.tf-slot.tf-over{border-color:var(--primary); background:var(--primary-soft)}
+  .tf-slot.tf-busy{opacity:.55; cursor:progress}
+  .tf-slot b{display:block; font-size:13px; margin-bottom:5px; color:var(--text)}
+  .tf-slot span{display:block; font-size:11.5px; color:var(--muted); line-height:1.55}
+  .tf-name{display:block; margin-top:8px; font-size:11.5px; color:var(--primary);
+    word-break:break-all; font-style:normal; line-height:1.5}
+  .tf-input{
+    border:1px solid var(--line); border-radius:6px; padding:5px 8px; font-size:12.5px;
+    font-family:inherit; color:var(--text); background:var(--card); width:120px;
+  }
+  .tf-log{
+    margin-top:12px; padding:9px 11px; border-radius:8px; font-size:11.5px;
+    background:var(--gray-soft); color:var(--muted); line-height:1.75;
+    max-height:160px; overflow:auto; display:none;
+  }
+  .tf-log:not(:empty){display:block}
+  .tf-err{color:var(--danger)}
+  .tf-kpis{display:grid; grid-template-columns:repeat(6,1fr); gap:12px}
+  .tf-kpi{text-align:center; padding:10px 6px; background:var(--gray-soft); border-radius:8px}
+  .tf-kpi .k{font-size:11.5px; color:var(--muted); margin-bottom:5px}
+  .tf-kpi .v{font-size:19px; font-weight:700; color:var(--text)}
+  .tf-files{margin-top:11px; font-size:11.5px; color:var(--muted); line-height:1.9}
+  tr.tf-hub td{background:#eef4ff}
+  tr.tf-bucket td{background:#fff8e6}
+  .tf-ok{color:var(--ok); font-weight:600}
+  .tf-warn{color:var(--warn); font-weight:600}
+  .tf-bad{color:var(--danger); font-weight:600}
+  @media (max-width:820px){
+    .tf-grid{grid-template-columns:1fr}
+    .tf-kpis{grid-template-columns:repeat(2,1fr)}
+  }
 </style>
 </head>
 <body>
@@ -327,6 +365,7 @@
       <div class="nav-title">数据</div>
       <a data-view="ledger"><span class="ico">▤</span>物料台账</a>
       <a data-view="trend"><span class="ico">◔</span>库存变化</a>
+      <a data-view="transfer"><span class="ico">⇄</span>物资调拨</a>
       <div class="nav-title">交付</div>
       <a data-view="report"><span class="ico">✎</span>库存日报</a>
       <a data-view="push"><span class="ico">✉</span>推送记录</a>
@@ -686,6 +725,52 @@
         </div>
       </section>
 
+      <!-- ---------- 物资调拨 ---------- -->
+      <section class="view" id="v-transfer">
+        <div class="card">
+          <div class="card-h">
+            <h2>物资调拨测算</h2>
+            <span class="hint">设计量表 + 站点现有量表 → 缺口、可调出余量、站点到站点的调拨单</span>
+          </div>
+          <div class="card-b">
+            <div class="tf-grid">
+              <div class="tf-slot" id="tfGap">
+                <b>① 到货 / 支出表</b>
+                <span>含「设计量」「支出」「差异」列；差异为负即缺口</span>
+                <em class="tf-name">未选择</em>
+                <input type="file" accept=".xlsx,.csv" hidden>
+              </div>
+              <div class="tf-slot" id="tfDesign">
+                <b>② 设计量表</b>
+                <span>一行一个站点、一列一个物料编码；工期列用来分项目</span>
+                <em class="tf-name">未选择</em>
+                <input type="file" accept=".xlsx,.csv" hidden>
+              </div>
+              <div class="tf-slot" id="tfStock">
+                <b>③ 站点现有量表</b>
+                <span>可一次选多份（不同项目各一份），自动识别属于哪个工期</span>
+                <em class="tf-name">未选择</em>
+                <input type="file" accept=".xlsx,.csv" multiple hidden>
+              </div>
+            </div>
+            <div class="toolbar">
+              <span style="font-size:12.5px;color:var(--muted)">目标工期</span>
+              <input class="tf-input" id="tfTarget" value="七期三阶段">
+              <span style="font-size:12.5px;color:var(--muted)">中转站</span>
+              <input class="tf-input" id="tfHub" value="八期二阶段">
+              <button class="btn primary" id="tfRun">开始测算</button>
+              <button class="btn" id="tfExport" disabled>导出 xlsx</button>
+              <button class="btn" id="tfClear">清空现有量表</button>
+            </div>
+            <div class="tf-log" id="tfLog"></div>
+          </div>
+        </div>
+        <div class="card" id="tfKpiCard" style="display:none">
+          <div class="card-b"><div class="tf-kpis" id="tfKpi"></div></div>
+        </div>
+        <div id="tfOut"></div>
+      </section>
+
       <!-- ---------- 数据与说明 ---------- -->
       <section class="view" id="v-about">
         <div class="card">
@@ -755,7 +840,10 @@
 <script src="wb-meta.js"></script>
 <!-- 零依赖表格读取与合并（可在 Node 下单独测试） -->
 <script src="xlsx-lite.js"></script>
+<!-- 纯前端生成 xlsx（调拨方案导出用，无依赖） -->
+<script src="xlsx-write-lite.js"></script>
 <script src="wb-merge.js"></script>
+<script src="wb-transfer.js"></script>
 <script src="wb-ui.js"></script>
 <script>
 /* ============================================================
@@ -1229,6 +1317,7 @@ const VIEW_META = {
   shortage:["短缺预警","低于安全库存或已无库存的物料"],
   overstock:["积压识别","长期无出库、占用资金的物料"],
   ledger:["物料台账","全量库存明细"],
+  transfer:["物资调拨","设计量 + 站点现有量 → 缺口与调拨执行单"],
   trend:["库存变化","当日与历史快照比对"],
   report:["库存日报","数据明细 + 分析结论 + 预警建议"],
   push:["推送记录","日报定向推送历史"],
@@ -1295,6 +1384,7 @@ function init(){
   $("#filePick").addEventListener("change", onFilePicked);
   bindPWA();
   if (window.WbUI) window.WbUI.boot();
+  if (window.WbTransfer) window.WbTransfer.boot();
 
   const bind = (sel, fn) => $(sel).addEventListener("input", fn);
   bind("#shortQ", renderShortage); bind("#shortLevel", renderShortage);

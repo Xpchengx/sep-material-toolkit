@@ -4,14 +4,16 @@
      · 数据文件（workbench-data.js）不缓存，永远取新的
    ⚠️ 改动页面后请把 VERSION 加一，否则用户拿到的是旧缓存。
 */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = 'material-workbench-' + VERSION;
 
 const SHELL = [
   './',
   './index.html',
   './xlsx-lite.js',
+  './xlsx-write-lite.js',
   './wb-merge.js',
+  './wb-transfer.js',
   './wb-ui.js',
   './manifest.webmanifest',
   './icons/icon.svg',
